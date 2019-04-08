@@ -1,0 +1,39 @@
+Todos
+add tags to includes and possibly roles, plays and tags have a tags: attribute
+setup conf templates
+should add  any_errors_fatal: True to roles when in production
+ensure files/actions aren't being replicated unnecessarily 
+[X]fix the tag problem...
+ensure filenames are all using underscores
+setup pipelining
+
+Unmerged fix for crtical tag issue; requires manual fix until 2.4.1
+https://github.com/ansible/ansible/pull/30333
+
+When thinking about a task:
+1.) what hosts will this is run on?
+2.) can it belong to any current tags or does it need one?
+3.) do tasks require variables on the host, inventory vars or both?
+4.) can any sub processes be made; parallel tasks?
+
+Demos
+flattened list
+---
+# file: roles/foo/vars/main.yml
+packages_base:
+  - [ 'foo-package', 'bar-package' ]
+packages_apps:
+  - [ ['one-package', 'two-package' ]]
+  - [ ['red-package'], ['blue-package']]
+
+- name: flattened loop demo
+  yum: name={{ item }} state=installed
+  with_flattened:
+    - packages_base
+    - packages_apps
+
+- action: shell /usr/bin/foo
+  register: result
+  until: result.stdout.find("all systems go") != -1
+  retries: 5
+  delay: 10

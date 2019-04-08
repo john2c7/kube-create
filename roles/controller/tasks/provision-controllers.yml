@@ -1,0 +1,47 @@
+- name: Register controller facts
+  local_action:
+    module: ec2_instance_facts
+    region: "{{ region }}"
+    filters:
+      vpc-id: "{{ vpc_id }}"
+      "tag:Environment": "{{ env }}"
+      "tag:Role": "controller"
+  register: controller_instance_facts
+
+- name: Add controllers to the inventory
+  local_action:
+      module: add_host
+      name: "{{ hostvars[inventory_hostname]['inventory_hostname'] }}"
+      group: controller_nodes
+      ansible_user: ubuntu
+
+- name: Change the hostname 
+  become: yes
+  hostname:
+    name: "{{ hostvars[inventory_hostname]['ec2_tag_Name'] }}"
+
+# replaces 127.0.0.1 localhost with 127.0.0.1 localhost controller-x
+- name: Add hostname to /etc/hosts
+  become: yes
+  lineinfile:
+    dest: /etc/hosts
+    regexp: '^127\.0\.0\.1[ \t]+localhost'
+    line: "127.0.0.1 localhost {{ hostvars[inventory_hostname]['ec2_tag_Name'] }}"
+    state: present
+
+- name: Copy keys to controller(s)
+  become: yes
+  copy: src={{ item.src }} dest={{ item.dest }}
+  with_items:
+    - { src: '{{ working_dir }}/ca.pem', dest: '.' }
+    - { src: '{{ working_dir }}/ca-key.pem', dest: '.' }
+    - { src: '{{ working_dir  }}/kubernetes-key.pem', dest: '.' }
+    - { src: '{{ working_dir }}/kubernetes.pem', dest: '.' }
+  when: "'controller_nodes' in group_names"
+  
+- name: Copy encryption key and configuration to controller(s)
+  become: yes
+  copy: src={{ item.src }} dest={{ item.dest }}
+  with_items:
+    - { src: '{{ working_dir_crypt }}/encryption-config.yaml', dest: '.' }
+  when: "'controller_nodes' in group_names"

@@ -1,0 +1,35 @@
+- name: Register controller facts
+  local_action:
+     module: ec2_instance_facts
+     region: "{{ region }}"
+     filters:
+       vpc-id: "{{ vpc_id }}"
+       "tag:Environment": "{{ env }}"
+       "tag:Role": "controller"
+  register: controller_instance_facts
+
+- name: Add controllers to the inventory
+  local_action:
+      module: add_host
+      name: "{{ item.private_ip_address }}"
+      group: controller_nodes
+      ansible_user: ubuntu
+  with_items: "{{ controller_instance_facts.instances }}"
+
+- name: Register worker facts
+  local_action:
+      module: ec2_instance_facts
+      region: "{{ region }}"
+      filters:
+        vpc-id: "{{ vpc_id }}"
+        "tag:Environment": "{{ env }}"
+        "tag:Role": "worker"
+  register: worker_instance_facts
+
+- name: Add workers to the inventory
+  local_action:
+      module: add_host
+      name: "{{ item.private_ip_address }}"
+      group: worker_nodes
+      ansible_user: ubuntu
+  with_items: "{{ worker_instance_facts.instances }}"

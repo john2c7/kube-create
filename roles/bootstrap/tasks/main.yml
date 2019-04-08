@@ -1,0 +1,6 @@
+# roles/common/tasks/main.yml
+- import_tasks: generate-inventory.yml
+- import_tasks: provision-cluster.yml tags=bootstrap
+- import_tasks: bootstrap-osx.yml
+- import_tasks: generate-certs.yml
+- import_tasks: generate-conf.yml

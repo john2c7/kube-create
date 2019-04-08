@@ -1,0 +1,17 @@
+---
+# group vars for ec2 test-dev
+env: test-dev
+region: us-east-1
+instance_type: m4.large
+image: ami-d15a75c7  #includes scaleio kernal module for all nodes
+vpc_id: vpc-25948443 #corp
+keypair: jawbone_2015-02-20
+subnet_1: 172.18.70.0/24 #corp master
+subnet_2: 172.18.80.0/24 #corp worker1
+subnet_3: 172.18.90.0/24 #corp worker2
+subnet_4: 172.18.100.0/24 #corp worker3
+controller_nodes: [1,2,3] # set number of nodes
+# working dirs are local 
+working_dir: /tmp/kube-bootstrap
+working_dir_conf: /tmp/kube-bootstrap/conf
+working_dir_crypt: /tmp/kube-bootstrap/crypt

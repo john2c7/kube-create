@@ -1,0 +1,21 @@
+- name: Install Go, Python and kubectl are installed
+  homebrew:
+    state: present
+    name: "{{ item }}"
+  with_items:
+    - golang
+    - python
+    - kubectl
+
+- name: Make our working directories 
+  file:
+    path: "{{ item }}" 
+    state: directory
+    mode: 0755
+  with_items:
+    - /tmp/kube-bootstrap
+    - /tmp/kube-bootstrap/conf
+    - /tmp/kube-bootstrap/crypt
+
+- name: Install cfssl, Install cfssljson
+  shell: go get -u github.com/cloudflare/cfssl/cmd/cfssl && go get -u github.com/cloudflare/cfssl/cmd/cfssljson

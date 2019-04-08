@@ -1,0 +1,4 @@
+- import_tasks: bootstrap.yml
+- import_tasks: provision-controllers.yml
+- import_tasks: etcd.yml
+- import_tasks: kube-ctrl-plane.yml

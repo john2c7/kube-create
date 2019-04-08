@@ -1,0 +1,27 @@
+# todo: this should probably be a nested loop
+- name: Copy CA to Workers
+  copy:  { src: '{{ working_dir }}/ca.pem', dest: '.' }
+  when: "'worker_nodes' in group_names"
+
+- name: Copy keys to Workers
+  copy: { src: "{{ working_dir }}/{{ hostvars[inventory_hostname]['ec2_tag_Name']}}-key.pem", dest: '.' }
+  #copy: { src: '{{ working_dir }}/worker-{{ item.0 }}-key.pem', dest: '.' }
+  #with_indexed_items: "{{ hostvars[inventory_hostname]['groups']['worker_nodes'] }}" 
+  when: "'worker_nodes' in group_names"
+
+- name: Copy pems to Workers
+  copy: { src: "{{ working_dir }}/{{ hostvars[inventory_hostname]['ec2_tag_Name']}}.pem", dest: '.' }
+  #copy: { src: '{{ working_dir }}/worker_{{ item.0 }}.pem', dest: '.' }
+  #with_indexed_items: "{{ hostvars[inventory_hostname]['groups']['worker_nodes'] }}" 
+  when: "'worker_nodes' in group_names"
+
+- name: Copy kubelet configuration to Workers
+  copy: { src: "{{ working_dir }}/{{ hostvars[inventory_hostname]['ec2_tag_Name']}}-key.pem", dest: '.' }
+  #copy: { src: '{{ working_dir_conf }}/worker-{{ item.0 }}.kubeconfig', dest: '.' }
+  #with_indexed_items: "{{ hostvars[inventory_hostname]['groups']['worker_nodes'] }}" 
+  when: "'worker_nodes' in group_names"
+
+- name: Copy kube-proxy configuration to Workers
+  copy: { src: '{{ working_dir_conf }}/kube-proxy.kubeconfig', dest: '.' }
+  #with_indexed_items: "{{ hostvars[inventory_hostname]['groups']['worker_nodes'] }}" 
+  when: "'worker_nodes' in group_names"

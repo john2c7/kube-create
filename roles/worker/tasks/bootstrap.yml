@@ -1,0 +1,4 @@
+- name: Install python 
+  remote_user: ubuntu
+  become: yes
+  raw: test -e /usr/bin/python || (apt update -y && apt install -y python-minimal)

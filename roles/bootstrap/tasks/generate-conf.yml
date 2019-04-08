@@ -1,0 +1,95 @@
+# todo: below fact gathering is only needed when running standalone play, add logic to skip
+- name: Register controller facts
+  ec2_instance_facts:
+    region: "{{ region }}"
+    filters:
+      vpc-id: "{{ vpc_id }}"
+      "tag:Environment": "{{ env }}"
+      "tag:Role": "controller"
+  register: controller_instance_facts
+
+- name: Add controllers to the inventory
+  add_host:
+    name: "{{ item.private_ip_address }}"
+    group: controller_nodes
+    ansible_user: ubuntu
+  with_items: "{{ controller_instance_facts.instances }}"
+
+- name: Register worker facts
+  ec2_instance_facts:
+    region: "{{ region }}"
+    filters:
+      vpc-id: "{{ vpc_id }}"
+      "tag:Environment": "{{ env }}"
+      "tag:Role": "worker"
+  register: worker_instance_facts
+
+- name: Add workers to the inventory
+  add_host:
+    name: "{{ item.private_ip_address }}"
+    group: worker_nodes
+    ansible_user: ubuntu
+  with_items: "{{ worker_instance_facts.instances }}"
+
+  # todo: conf is set to first controller node ip - might need to add other controllers 
+- name: Generate kubelet Kubernetes Configuration
+  shell:
+    cmd: |
+     cd {{ working_dir }} && kubectl config set-cluster jhh \
+     --certificate-authority=ca.pem \
+     --embed-certs=true \
+     --server=https://{{ controller_instance_facts.instances[0].private_ip_address }}:6443
+     --kubeconfig={{ working_dir_conf }}/worker_{{ item.0 }}.kubeconfig
+
+     kubectl config set-credentials system:node:worker_{{ item.0 }} \
+     --client-certificate=worker_{{ item.0 }}.pem \
+     --client-key=worker_{{ item.0 }}-key.pem \
+     --embed-certs=true \
+     --kubeconfig={{ working_dir_conf }}/worker_{{ item.0 }}.kubeconfig
+
+     kubectl config set-context default \
+     --cluster=jhh \
+     --user=system:node:worker_{{ item.0 }} \
+     --kubeconfig=worker_{{ item.0 }}.kubeconfig
+
+     kubectl config use-context default --kubeconfig=worker_{{ item.0 }}.kubeconfig
+  with_indexed_items: "{{ hostvars[inventory_hostname]['groups']['worker_nodes'] }}" 
+
+  # todo: conf is set to first controller node ip - might need to add other controllers 
+- name: Generate kube-proxy Configuration 
+  shell:
+    cmd: |
+     cd {{ working_dir }} && kubectl config set-cluster jhh \
+     --certificate-authority=ca.pem \
+     --embed-certs=true \
+     --server=https://{{ controller_instance_facts.instances[0].private_ip_address }}:6443
+     --kubeconfig={{ working_dir_conf }}/kube-proxy.kubeconfig
+
+     kubectl config set-credentials kube-proxy \
+     --client-certificate=kube-proxy.pem \
+     --client-key={{ working_dir_conf }}/kube-proxy.kubeconfig
+
+     kubectl config set-context default \
+     --cluster=jhh \
+     --user=kube-proxy \
+     --kubeconfig={{ working_dir_conf }}/kube-proxy.kubeconfig
+
+     kubectl config use-context default --kubeconfig={{ working_dir_conf }}/kube-proxy.kubeconfig
+
+- name: Generate key and encryption configuration file
+  shell:
+    cmd: |
+     ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64) &&
+     cd {{ working_dir_crypt }} && cat > encryption-config.yaml <<EOF
+     kind: EncryptionConfig
+     apiVersion: v1
+     resources:
+       - resources:
+           - secrets
+         providers:
+           - aescbc:
+               keys:
+                 - name: key1
+                   secret: $ENCRYPTION_KEY
+           - identity: {}
+     EOF

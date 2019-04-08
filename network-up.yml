@@ -1,0 +1,21 @@
+---
+# master playbook 
+# file: network-up.yml
+- name: bootstrap the network
+  hosts: localhost
+  roles:
+    - bootstrap 
+
+- name: configure controllers
+  gather_facts: False
+  become: no 
+  hosts: controller_nodes
+  roles:
+    - controller 
+
+- name: configure workers 
+  gather_facts: False 
+  become: yes
+  hosts: worker_nodes 
+  roles:
+    - worker

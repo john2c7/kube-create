@@ -1,0 +1,111 @@
+# todo: probably want to change this to get_url later
+- name: Download and install etcd binaries
+  shell: 
+    cmd: |
+      wget -q --show-progress --https-only --timestamping \
+      "https://github.com/coreos/etcd/releases/download/v3.2.8/etcd-v3.2.8-linux-amd64.tar.gz"
+      tar -xvf etcd-v3.2.8-linux-amd64.tar.gz
+      sudo mv etcd-v3.2.8-linux-amd64/etcd* /usr/local/bin/
+      sudo mkdir -p /etc/etcd /var/lib/etcd
+      sudo cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd
+  when: "'controller_nodes' in group_names"
+
+- name: Register controller facts
+  local_action:
+    module: ec2_instance_facts
+    region: "{{ region }}"
+    filters:
+      vpc-id: "{{ vpc_id }}"
+      "tag:Environment": "{{ env }}"
+      "tag:Role": "controller"
+  register: controller_instance_facts
+
+- name: Add controllers to the inventory
+  local_action:
+      module: add_host
+      name: "{{ hostvars[inventory_hostname]['inventory_hostname'] }}"
+      group: controller_nodes
+      ansible_user: ubuntu
+
+- name: touch bashrc 
+  become: yes
+  file: 
+    state: touch
+    path: /home/ubuntu/.bashrc
+    mode: 0644 
+
+- name: Setup persistent internal ip env var 
+  become: yes 
+  lineinfile:
+    state: present
+    dest: /home/ubuntu/.bashrc 
+    line: "export INTERNAL_IP={{ hostvars[inventory_hostname]['inventory_hostname'] }}"
+    insertafter: "EOF"
+
+- name: Setup persistent hostname env var
+  become: yes 
+  lineinfile:
+    state: present
+    dest: /home/ubuntu/.bashrc 
+    line: "export ETCD_NAME={{ hostvars[inventory_hostname]['ec2_tag_Name'] }}" 
+    insertafter: "EOF"
+
+- name: Set controller name/ip list 
+  set_fact:
+    name_ips: [] 
+
+- name: Format the names and ips into a string for conf 
+  set_fact:
+    name_ips: "{{ name_ips }} + [ '{{ item.tags['Name'] }}=https://{{ item.private_ip_address }}:2380' ]"
+  with_items: "{{ controller_instance_facts.instances }}" 
+
+- name: Flatten controller string
+  set_fact:
+    controller_string: "{{name_ips | join(',')}}"
+
+- name: Create the etcd.service systemd unit file
+  shell:
+    cmd: |
+      cat > etcd.service <<EOF
+      [Unit]
+      Description=etcd
+      Documentation=https://github.com/coreos
+
+      [Service]
+      ExecStart=/usr/local/bin/etcd \\
+        --name {{ hostvars[inventory_hostname]['ec2_tag_Name'] }} \\
+        --cert-file=/etc/etcd/kubernetes.pem \\
+        --key-file=/etc/etcd/kubernetes-key.pem \\
+        --peer-cert-file=/etc/etcd/kubernetes.pem \\
+        --peer-key-file=/etc/etcd/kubernetes-key.pem \\
+        --trusted-ca-file=/etc/etcd/ca.pem \\
+        --peer-trusted-ca-file=/etc/etcd/ca.pem \\
+        --peer-client-cert-auth \\
+        --client-cert-auth \\
+        --initial-advertise-peer-urls https://{{ hostvars[inventory_hostname]['ansible_host'] }}:2380 \\
+        --listen-peer-urls https://{{ hostvars[inventory_hostname]['ansible_host'] }}:2380 \\
+        --listen-client-urls https://{{ hostvars[inventory_hostname]['ansible_host'] }}:2379,http://127.0.0.1:2379 \\
+        --advertise-client-urls https://{{ hostvars[inventory_hostname]['ansible_host'] }}:2379 \\
+        --initial-cluster-token etcd-cluster-0 \\
+        --initial-cluster {{ controller_string }} \\
+        --initial-cluster-state new \\
+        --data-dir=/var/lib/etcd
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+      EOF
+
+- name: Move etcd configuration into place 
+  shell: 
+    cmd: |
+      sudo mv etcd.service /etc/systemd/system/
+
+- name: Reload config and start etcd
+  become: yes
+  systemd:
+     name: etcd
+     daemon_reload: yes
+     enabled: yes
+     state: restarted

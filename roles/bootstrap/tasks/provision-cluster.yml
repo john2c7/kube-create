@@ -1,0 +1,168 @@
+- name: Create security group
+  local_action: 
+    module: ec2_group
+    name: "{{ env }} Security Group" 
+    description: Security group for cluster nodes 
+    region: "{{ region }}"
+    resource_tags: { "Environment":"{{ env }}" } 
+    rules:
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 2380 #ETCD peer
+        to_port: 2380 
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 2379 #ETCD client 
+        to_port: 2379 
+        cidr_ip: 0.0.0.0/0
+    rules_egress:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+    vpc_id: "{{ vpc_id }}" 
+  register: security_group
+
+- name: Create Subnet_1 
+  local_action:
+    module: ec2_vpc_subnet
+    state: present
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ subnet_1 }}" 
+    resource_tags: { "Name":"{{ env }}_subnet_1_controller", "Role":"controller", "Environment":"{{ env }}" } 
+    region: "{{ region }}" 
+    az: us-east-1a
+  register: controller_subnet
+
+- name: Create Subnet_2 
+  local_action:
+    module: ec2_vpc_subnet
+    state: present
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ subnet_2 }}" 
+    resource_tags: { "Name":"{{ env }}_subnet_2", "Role":"worker", "Environment":"{{ env }}" } 
+    region: "{{ region }}" 
+    az: us-east-1d
+
+- name: Create Subnet_3 
+  local_action:
+    module: ec2_vpc_subnet
+    state: present
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ subnet_3 }}" 
+    resource_tags: { "Name":"{{ env }}_subnet_3", "Role":"worker", "Environment":"{{ env }}" } 
+    region: "{{ region }}" 
+    az: us-east-1e
+
+- name: Create Subnet_4 
+  local_action:
+    module: ec2_vpc_subnet
+    state: present
+    vpc_id: "{{ vpc_id }}"
+    cidr: "{{ subnet_4 }}" 
+    resource_tags: { "Name":"{{ env }}_subnet_4", "Role":"worker", "Environment":"{{ env }}" } 
+    region: "{{ region }}" 
+    az: us-east-1a
+
+- name: Gather controller subnet facts 
+  ec2_vpc_subnet_facts:
+    region: "{{ region }}"
+    filters:
+       vpc-id: "{{ vpc_id }}"
+       "tag:Environment": "{{ env }}"
+       "tag:Role": "controller"
+  register: subnet_controller_facts
+
+- name: Gather worker subnet facts 
+  ec2_vpc_subnet_facts:
+    region: "{{ region }}"
+    filters:
+       vpc-id: "{{ vpc_id }}"
+       "tag:Environment": "{{ env }}"
+       "tag:Role": "worker"
+  register: subnet_worker_facts
+
+- name: Create identical routing table to corp private and associate 
+  ec2_vpc_route_table:
+    state: present
+    region: "{{ region }}"
+    vpc_id: "{{ vpc_id }}"
+    resource_tags: { "Name":"{{ env }}_routing", "Environment":"{{ env }}" } 
+    subnets:  
+      - "{{ subnet_1 }}"
+      - "{{ subnet_2 }}"
+      - "{{ subnet_3 }}"
+      - "{{ subnet_4 }}"
+    routes:
+      - dest: 0.0.0.0/0 
+        gateway_id: vgw-8625cdef
+      - dest: 172.17.0.0/16 
+        vpc_peering_connection_id: pcx-3352235a
+      - dest: 172.19.0.0/16
+        vpc_peering_connection_id: pcx-c11974a8
+      - dest: 172.20.0.0/16
+        vpc_peering_connection_id: pcx-0e127a67
+      - dest: 172.24.0.0/16
+        vpc_peering_connection_id: pcx-c55437ac
+
+- name: Provision controller instance(s)
+  ec2:
+     vpc_subnet_id: "{{ controller_subnet.subnet.id }}"
+     group_id: "{{ security_group.group_id }}" 
+     instance_type: "{{ instance_type }}"
+     assign_public_ip: no
+     image: "{{ image }}" 
+     wait: yes 
+     region: "{{ region }}"
+     keypair: "{{ keypair }}"
+     tenancy: dedicated
+     instance_tags: { "Name":"controller_{{ item.0 }}", "Role":"controller", "Environment":"{{ env }}" }
+     # ensure duplicates are not made and skip if created
+     exact_count: 1 
+     count_tag: { "Name":"controller_{{ item.0 }}", "Role":"controller", "Environment":"{{ env }}" } 
+  with_indexed_items: "{{ controller_nodes }}" 
+  register: ec2
+
+- name: Provision worker instances
+  local_action:
+     module: ec2
+     vpc_subnet_id: "{{ item.1.id }}"
+     group_id: "{{ security_group.group_id }}" 
+     instance_type: "{{ instance_type }}"
+     assign_public_ip: no
+     image: "{{ image }}" 
+     wait: yes 
+     region: "{{ region }}"
+     keypair: "{{ keypair }}"
+     tenancy: dedicated
+     instance_tags: { "Name":"worker_{{ item.0 }}", "Role":"worker", "Environment":"{{ env }}" }
+     # ensure duplicates are not made and skip if created
+     exact_count: 1 
+     count_tag: { "Name":"worker_{{ item.0 }}", "Role":"worker", "Environment":"{{ env }}" } 
+  with_indexed_items: "{{ subnet_worker_facts.subnets }}" 
+  register: ec2
+
+- name: Wait for SSH to come up on controller(s)
+  local_action:
+     module: wait_for 
+     host: "{{ item.private_ip_address }}" 
+     port: 22 
+     state: started
+  with_items: "{{ controller_instance_facts.instances }}"
+
+- name: Wait for SSH to come up on workers 
+  local_action:
+     module: wait_for 
+     host: "{{ item.private_ip_address }}" 
+     port: 22 
+     state: started
+  with_items: "{{ worker_instance_facts.instances }}"
